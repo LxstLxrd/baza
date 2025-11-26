@@ -38,7 +38,7 @@ class DatabaseManager:
         self.current_user = None
 
     def connect(self, host="localhost", database="electronics_store",
-                user="postgres", password="ilya04062004", port="5432"):
+                user="postgres", password="password", port="5432"):
         try:
             self.connection = psycopg2.connect(
                 host=host,
@@ -1925,7 +1925,7 @@ def main():
 
     # For demonstration, using default connection parameters
     if not db_manager.connect(host="localhost", user="postgres",
-                              password="ilya04062004", database="electronics_store"):
+                              password="password", database="electronics_store"):
         QMessageBox.critical(None, 'Ошибка', 'Не удалось подключиться к базе данных')
         return 1
 
@@ -1940,4 +1940,5 @@ def main():
 
 
 if __name__ == '__main__':
+
     sys.exit(main())
