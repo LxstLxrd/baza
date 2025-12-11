@@ -1,0 +1,4 @@
+-- Обновление всех паролей на MD5 хэш от "123456"
+UPDATE users 
+SET password_hash = MD5('123456')
+WHERE password_hash != MD5('123456') OR password_hash IS NULL;
