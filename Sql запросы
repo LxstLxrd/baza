@@ -1,0 +1,126 @@
+1. Демонстрация работы Триггеров
+В вашей схеме есть несколько важных автоматизаций.
+А. Триггер создания записи на складе (create_inventory_after_product)
+Суть: При добавлении товара в products, запись в inventory должна появиться сама.
+-- 1. Добавляем новый товар (заметьте, мы НЕ трогаем таблицу inventory)
+INSERT INTO products (name, category_id, price, sku, description) 
+VALUES ('Тестовый Планшет', 1, 45000.00, 'TEST-TAB-001', 'Проверка триггера склада')
+RETURNING product_id, name;
+
+-- 2. Проверяем таблицу inventory. Там автоматически должна появиться запись с quantity = 0
+SELECT i.inventory_id, p.name, i.quantity, i.last_updated 
+FROM inventory i
+JOIN products p ON i.product_id = p.product_id
+WHERE p.sku = 'TEST-TAB-001';
+
+Б. Триггер логирования статусов (log_order_status_changes)
+Суть: При смене статуса заказа, старый и новый статус записываются в историю.
+-- 1. Смотрим текущий статус заказа №3
+SELECT order_id, status FROM orders WHERE order_id = 3;
+
+-- 2. Меняем статус с 'pending' на 'confirmed'
+UPDATE orders 
+SET status = 'confirmed' 
+WHERE order_id = 3;
+
+-- 3. Проверяем таблицу логов (order_status_log)
+-- Вы должны увидеть запись: old_status='pending', new_status='confirmed'
+SELECT * FROM order_status_log WHERE order_id = 3 ORDER BY changed_at DESC;
+
+В. Триггер обновления времени (update_products_updated_at)
+Суть: Поле updated_at обновляется автоматически при любом изменении товара.
+-- 1. Смотрим текущее время обновления товара
+SELECT name, price, updated_at FROM products WHERE sku = 'TEST-TAB-001';
+
+-- 2. Меняем цену товара (подождите пару секунд перед запуском, чтобы увидеть разницу во времени)
+UPDATE products SET price = 42000.00 WHERE sku = 'TEST-TAB-001';
+
+-- 3. Проверяем, что updated_at изменился, а created_at остался прежним
+SELECT name, price, created_at, updated_at FROM products WHERE sku = 'TEST-TAB-001';
+
+2. Демонстрация работы Представлений (Views)
+Представления упрощают сложные JOIN запросы.
+А. Представление товаров со складом (v_products_with_inventory)
+Суть: Показывает товар сразу с категорией и остатком, скрывая сложность соединений.
+-- Выбираем товары, которых мало на складе (используя view)
+-- В нашей тестовой вставке у новых товаров 0 на остатке
+SELECT 
+    name AS "Товар", 
+    category_name AS "Категория", 
+    available_quantity AS "Доступно", 
+    price AS "Цена"
+FROM v_products_with_inventory
+WHERE available_quantity < 5;
+
+Б. Представление деталей заказа (v_order_details)
+Суть: Сводная информация по заказу ("Чек").
+-- Получить красивую сводку по всем заказам со статусом 'delivered'
+SELECT 
+    order_id, 
+    customer_name, 
+    total_amount, 
+    items_count, 
+    shipping_address 
+FROM v_order_details
+WHERE status = 'delivered';
+
+3. Демонстрация генерируемых столбцов (Generated Columns)
+В таблице order_items поле subtotal вычисляется автоматически базой данных.
+-- 1. Добавляем позицию в заказ №3 (товар с ID 1, цена 99990, кол-во 2)
+-- Обратите внимание: мы НЕ указываем поле subtotal в INSERT
+INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+VALUES (3, 1, 2, 99990.00)
+RETURNING order_item_id, quantity, unit_price, subtotal;
+
+-- Результат: база сама посчитает 2 * 99990 = 199980.00 в колонке subtotal.
+
+4. Демонстрация работы индексов и расширений
+Вы подключили pg_trgm и создали GIN индекс для полнотекстового поиска.
+Полнотекстовый поиск (Индекс idx_products_name_search)
+Этот индекс позволяет быстро искать товары, даже если база огромная.
+-- Поиск товаров, содержащих слово "смартфон" (с учетом морфологии русского языка)
+-- EXPLAIN ANALYZE покажет, что используется Index Scan, а не Seq Scan
+EXPLAIN ANALYZE
+SELECT name, price 
+FROM products 
+WHERE to_tsvector('russian', name) @@ to_tsquery('russian', 'смартфон');
+
+-- Реальное выполнение запроса
+SELECT name, description, price 
+FROM products 
+WHERE to_tsvector('russian', name) @@ to_tsquery('russian', 'смартфон | телефон');
+
+5. Комплексный пример (Жизненный цикл)
+Этот блок имитирует реальную работу бэкенда:
+BEGIN; -- Начало транзакции
+
+-- 1. Клиент делает заказ
+INSERT INTO orders (customer_id, status, total_amount, shipping_address_id, payment_method)
+VALUES (1, 'pending', 0, 1, 'card') -- Сумму пока ставим 0
+RETURNING order_id INTO temp_order_id; -- (в psql это требует \gset или переменных, здесь для наглядности)
+
+-- Представим, что order_id = 4 (новый)
+
+-- 2. Добавляем товары
+INSERT INTO order_items (order_id, product_id, quantity, unit_price)
+VALUES (4, 1, 1, 99990.00); -- iPhone
+
+-- 3. Обновляем общую сумму заказа (в реальном приложении это делается кодом или еще одним триггером)
+UPDATE orders 
+SET total_amount = (SELECT SUM(subtotal) FROM order_items WHERE order_id = 4)
+WHERE order_id = 4;
+
+-- 4. Списываем резерв со склада (логика резервирования)
+UPDATE inventory 
+SET reserved_quantity = reserved_quantity + 1 
+WHERE product_id = 1;
+
+-- 5. Менеджер подтверждает заказ (сработает триггер логов)
+UPDATE orders SET status = 'confirmed' WHERE order_id = 4;
+
+COMMIT; -- Фиксация изменений
+
+-- 6. Проверка результата
+SELECT * FROM v_order_details WHERE order_id = 4;
+SELECT * FROM order_status_log WHERE order_id = 4;
+SELECT * FROM inventory WHERE product_id = 1;
