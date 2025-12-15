@@ -287,6 +287,11 @@ INSERT INTO users (email, password_hash, role, created_at, last_login, is_active
 ('petrov@gmail.com', 'hashed_password_123', 'customer', '2023-02-15 14:30:00', '2024-01-17 09:45:00', true),
 ('sidorova@yandex.ru', 'hashed_password_123', 'customer', '2023-03-05 16:45:00', '2024-01-16 18:20:00', true);
 
+-- Обновление всех паролей на MD5 хэш от "123456"
+UPDATE users 
+SET password_hash = MD5('123456')
+WHERE password_hash != MD5('123456') OR password_hash IS NULL;
+
 -- Вставка профилей клиентов
 INSERT INTO customers (user_id, first_name, last_name, phone, date_of_birth, registration_date)
 SELECT 
